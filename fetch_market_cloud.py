@@ -191,11 +191,13 @@ def main():
     print(f"Fetching (IV expiry ≈ {IV_DAYS} days out)…")
 
     und = {}
+    fresh_iv = {}                       # sym -> (iv, exp) fetched THIS run
     for sym in UNDERLYINGS:
         p = price_of(sym)
         iv, exp = (None, None)
         if p:
             iv, exp = iv_of(sym, p)
+        fresh_iv[sym] = (iv, exp)
         prev = old_und.get(sym) or {}
         und[sym] = {"px": p or prev.get("px"),
                     "iv": iv or prev.get("iv"),
@@ -203,6 +205,17 @@ def main():
         stale = " (kept previous)" if (not p or not iv) and prev else ""
         print(f"  {sym:<5} px {und[sym]['px']}   IV {und[sym]['iv']}%"
               f"  ({und[sym]['ivExp']}){stale}")
+
+    # GLDM tracks the same underlying (gold) as GLD, so their implied vol is
+    # the same. GLDM's own options chain is thin and usually returns no IV,
+    # which would leave it frozen at the previous value. When this run got a
+    # fresh GLD IV but no fresh GLDM IV, proxy GLD's onto GLDM.
+    gld_iv, gld_exp = fresh_iv.get("GLD", (None, None))
+    gldm_iv, _ = fresh_iv.get("GLDM", (None, None))
+    if gld_iv and not gldm_iv and "GLDM" in und:
+        und["GLDM"]["iv"] = gld_iv
+        und["GLDM"]["ivExp"] = gld_exp
+        print(f"  GLDM  IV proxied from GLD -> {gld_iv}% ({gld_exp})")
 
     xau = xau_spot() or old.get("xau")
     btc = btc_spot() or old.get("btc")
