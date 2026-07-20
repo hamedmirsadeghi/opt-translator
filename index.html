@@ -190,7 +190,7 @@
         </div>
       </div>
       <div class="row" id="tlCandles">
-        <div><label>Candles</label><input type="number" id="candles" step="1" placeholder="100"></div>
+        <div><label>Candles</label><input type="number" id="candles" step="1" placeholder="100" value="200"></div>
         <div><label>Timeframe</label>
           <select id="tf">
             <option value="0.25">15 min</option>
@@ -211,7 +211,7 @@
         <div><label>Confidence</label>
           <select id="conf"><option value="low">Low</option><option value="med" selected>Medium</option><option value="high">High</option></select>
         </div>
-        <div><label>Max money risk $</label><input type="number" id="maxRisk" step="10" placeholder="800"></div>
+        <div><label>Max money risk $</label><input type="number" id="maxRisk" step="10" placeholder="800" value="1000"></div>
       </div>
       <div class="hint">With long options the premium IS the stop — this is the amount you accept losing entirely.</div>
 
@@ -309,6 +309,10 @@ function relabel(){const I=curInstr();
   updRatio()}
 function updRatio(){const x=+$('xauSpot').value,g=+$('gldSpot').value,I=curInstr();
   $('ratioChip').textContent=(x>0&&g>0)?(g/x).toFixed(5)+'  ('+I.und+' per '+I.chart+' $)':'—'}
+/* default target/invalidation = $10 above/under current spot, per direction */
+function setTargets(){const x=+$('xauSpot').value;if(!(x>0))return;const up=dir==='up';
+  $('xauTarget').value=(up?x+10:x-10).toFixed(2);
+  $('xauInvalid').value=(up?x-10:x+10).toFixed(2)}
 async function fillFromMarket(){
   try{const r=await fetch('market.js?v='+Date.now(),{cache:'no-store'});
     if(r.ok){const t=await r.text();
@@ -319,6 +323,7 @@ async function fillFromMarket(){
   if(M[I.mkey])$('xauSpot').value=M[I.mkey];
   if(u&&u.px)$('gldSpot').value=u.px;
   if(u&&u.iv)$('iv').value=u.iv;
+  setTargets();
   const age=Math.round((Date.now()-new Date(M.ts).getTime())/60000);
   $('mktNote').textContent='Filled from market.js — fetched '+age+' min ago'+(u&&u.ivExp?(' · IV from '+u.ivExp+' ATM'):'')+(age>60?'  ⚠ stale, re-run the script':'');
   updRatio(); if(lastCtx)translate(true)}
@@ -327,7 +332,7 @@ $('instr').addEventListener('change',()=>{relabel();if(window.MARKET)fillFromMar
 document.addEventListener('DOMContentLoaded',relabel);
 $('dirSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   dir=b.dataset.dir;
-  [...$('dirSeg').children].forEach(x=>{x.className = x===b ? ('on'+(dir==='down'?' down':'')) : ''});if(lastCtx)translate(true);});
+  [...$('dirSeg').children].forEach(x=>{x.className = x===b ? ('on'+(dir==='down'?' down':'')) : ''});setTargets();if(lastCtx)translate(true);});
 $('tlSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   tlMode=b.dataset.tl;
   [...$('tlSeg').children].forEach(x=>x.classList.toggle('on',x===b));
