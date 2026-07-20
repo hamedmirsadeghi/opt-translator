@@ -195,7 +195,9 @@ def main():
     for sym in UNDERLYINGS:
         p = price_of(sym)
         iv, exp = (None, None)
-        if p:
+        # GLDM's IV is proxied from GLD below (same underlying, identical vol),
+        # so never spend MarketData credits on GLDM's thin/flaky chain.
+        if p and sym != "GLDM":
             iv, exp = iv_of(sym, p)
         fresh_iv[sym] = (iv, exp)
         prev = old_und.get(sym) or {}
