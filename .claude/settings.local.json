@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(curl -s -o /dev/null -w \"index.html %{http_code}\\\\n\" http://127.0.0.1:8000/index.html)",
+      "Bash(curl -s -o /dev/null -w \"market.js  %{http_code}\\\\n\" http://127.0.0.1:8000/market.js)"
+    ]
+  }
+}

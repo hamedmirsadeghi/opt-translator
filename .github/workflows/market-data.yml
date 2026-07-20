@@ -1,0 +1,43 @@
+name: market data
+
+on:
+  schedule:
+    # every 15 min, 13:00-21:59 UTC, Mon-Fri  (covers US market hours in EST & EDT)
+    - cron: '*/15 13-21 * * 1-5'
+  workflow_dispatch: {}   # manual "Run workflow" button
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-data
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install requests
+
+      - name: Fetch market data
+        env:
+          MARKETDATA_TOKEN: ${{ secrets.MARKETDATA_TOKEN }}
+          ALPHAVANTAGE_KEY: ${{ secrets.ALPHAVANTAGE_KEY }}
+          IV_DAYS: '12'
+        run: python fetch_market_cloud.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "market-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add market.js
+          if ! git diff --cached --quiet; then
+            git commit -m "market $(date -u +'%Y-%m-%d %H:%M')Z"
+            git push
+          fi
