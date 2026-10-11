@@ -201,6 +201,16 @@
           </div>
         </div>
       </div>
+      <div class="row single">
+        <div>
+          <label>Structure</label>
+          <div class="seg" id="stSeg">
+            <button type="button" class="on" data-st="single">Single option</button>
+            <button type="button" data-st="spread">Vertical spread</button>
+          </div>
+          <div class="hint" id="stHint">Buy one option. Uncapped upside, but the whole premium must be earned back before any profit.</div>
+        </div>
+      </div>
       <div class="row">
         <div><label id="lblTgt">XAU target (TP)</label><input type="number" id="xauTarget" step="0.01" placeholder="4061.9"></div>
         <div><label id="lblInv">XAU invalidation <span style="opacity:.6">(optional)</span></label><input type="number" id="xauInvalid" step="0.01" placeholder="3947.0"></div>
@@ -238,7 +248,7 @@
         </div>
         <div><label>Max money risk $</label><input type="number" id="maxRisk" step="10" placeholder="800" value="1000"></div>
       </div>
-      <div class="hint">With long options the premium IS the stop — this is the amount you accept losing entirely.</div>
+      <div class="hint" id="riskHint">With long options the premium IS the stop — this is the amount you accept losing entirely.</div>
 
       <details class="adv">
         <summary>Advanced (defaults are fine)</summary>
@@ -286,7 +296,7 @@
   </div>
 </div>
 <footer>
-  Estimates use Black–Scholes with the IV you enter; real quotes differ — buy at the ask, sell at the bid, and always place a GTC take-profit so you never carry a long option into expiry day. One contract = 100 GLD shares. This tool is calculation aid, not financial advice.
+  Estimates use Black–Scholes with the IV you enter; real quotes differ — buy at the ask, sell at the bid, and always place a GTC take-profit so you never carry a long option into expiry day. One contract = 100 shares. Debit spreads: close them the day before expiry — a spread that expires between its strikes turns into a share position. This tool is calculation aid, not financial advice.
 </footer>
 <div class="tkt-back" id="tktBack"><div class="tkt" id="tkt"></div></div>
 <script src="market.js" onerror="void 0"></script>
@@ -320,7 +330,7 @@ const dteOf=d=>Math.max(1,Math.round((d-new Date())/86400000));
 const fmtDate=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'2-digit'});
 
 /* ================= ui state ================= */
-let dir='up', tlMode='candles', lastCands=[], lastCtx=null;
+let dir='up', tlMode='candles', struct='single', lastCands=[], lastCtx=null;
 const INSTR={
   gold_gld :{chart:'XAU',und:'GLD', mkey:'xau',cal:7/5,ivHint:'~20-25%',pxHint:'368.40',chHint:'4017.32'},
   gold_gldm:{chart:'XAU',und:'GLDM',mkey:'xau',cal:7/5,ivHint:'~20-25%',pxHint:'81.30', chHint:'4017.32'},
@@ -359,6 +369,17 @@ document.addEventListener('DOMContentLoaded',relabel);
 $('dirSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   dir=b.dataset.dir;
   [...$('dirSeg').children].forEach(x=>{x.className = x===b ? ('on'+(dir==='down'?' down':'')) : ''});setTargets();if(lastCtx)translate(true);});
+$('stSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  struct=b.dataset.st;
+  [...$('stSeg').children].forEach(x=>x.classList.toggle('on',x===b));
+  const sp=struct==='spread';
+  $('stHint').textContent=sp
+    ?'Buy one option and sell a further one near your target. Cheaper entry and nearer break-even; profit stops at the sold strike.'
+    :'Buy one option. Uncapped upside, but the whole premium must be earned back before any profit.';
+  $('riskHint').textContent=sp
+    ?'With a debit spread the net debit IS the stop — this is the amount you accept losing entirely.'
+    :'With long options the premium IS the stop — this is the amount you accept losing entirely.';
+  if(lastCtx)translate(true);});
 $('tlSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   tlMode=b.dataset.tl;
   [...$('tlSeg').children].forEach(x=>x.classList.toggle('on',x===b));
@@ -377,20 +398,84 @@ function updTl(){const c=+$('candles').value,tf=+$('tf').value;
 ['candles','tf','days'].forEach(id=>$(id).addEventListener('input',updTl));
 
 /* ================= engine ================= */
-function buildCandidates(ctx){
-  const {G,iv,r,comm,isCall,gldTarget,gldInvalid,estDays,maxRisk,bufA,bufB}=ctx;
-  const m=Math.abs(gldTarget-G)/G;
-  const offs=isCall? [-0.025,-0.012,0,0.45*m,0.9*m] : [0.025,0.012,0,-0.45*m,-0.9*m];
-  const strikes=[...new Set(offs.map(o=>Math.round(G*(1+o))))];
-  const mults=[1,bufA,bufB], seen=new Set(), exps=[];
-  for(const mu of mults){const d=nextExpiry(new Date(),Math.ceil(estDays*mu));const dte=dteOf(d);
+function expiries(ctx){
+  const mults=[1,ctx.bufA,ctx.bufB], seen=new Set(), exps=[];
+  for(const mu of mults){const d=nextExpiry(new Date(),Math.ceil(ctx.estDays*mu));const dte=dteOf(d);
     if(!seen.has(dte)){seen.add(dte);exps.push({date:d,dte,mult:mu})}}
-  const out=[];
-  for(const ex of exps)for(const K of strikes){
-    const c=priceCandidate(ctx,K,ex,null); if(c)out.push(c)}
+  return exps}
+function rank(out){
   out.sort((a,b)=>b.score-a.score);
   if(out.length&&out[0].score>=40){out[0].tags.unshift('Best fit');out[0].best=true}
   return out}
+function buildCandidates(ctx){
+  if(ctx.struct==='spread')return buildSpreads(ctx);
+  const {G,isCall,gldTarget}=ctx;
+  const m=Math.abs(gldTarget-G)/G;
+  const offs=isCall? [-0.025,-0.012,0,0.45*m,0.9*m] : [0.025,0.012,0,-0.45*m,-0.9*m];
+  const strikes=[...new Set(offs.map(o=>Math.round(G*(1+o))))];
+  const out=[];
+  for(const ex of expiries(ctx))for(const K of strikes){
+    const c=priceCandidate(ctx,K,ex,null); if(c)out.push(c)}
+  return rank(out)}
+
+/* vertical debit spread: buy a strike next to spot, sell one next to the target.
+   The sold leg pays for part of the bought one; profit stops at the sold strike. */
+function buildSpreads(ctx){
+  const {G,isCall,gldTarget:T}=ctx;
+  const longs =isCall?[Math.floor(G),Math.ceil(G),Math.floor(G)-1]:[Math.ceil(G),Math.floor(G),Math.ceil(G)+1];
+  const shorts=isCall?[Math.floor(T),Math.ceil(T),Math.ceil(T*1.025)]:[Math.ceil(T),Math.floor(T),Math.floor(T*0.975)];
+  const out=[];
+  for(const ex of expiries(ctx))for(const KL of new Set(longs))for(const KS of new Set(shorts)){
+    if((isCall?KS-KL:KL-KS)<1)continue;
+    const c=priceSpread(ctx,KL,KS,ex,null); if(c)out.push(c)}
+  return rank(out)}
+
+function priceSpread(ctx,KL,KS,ex,debitOverride){
+  const {G,iv,r,comm,isCall,gldTarget,gldInvalid,estDays,maxRisk,ratio}=ctx;
+  const T=ex.dte/365, w=Math.abs(KL-KS);
+  const eL=bs(G,KL,T,iv,r,isCall), eS=bs(G,KS,T,iv,r,isCall);
+  const debit=debitOverride!=null?debitOverride:eL.price-eS.price;
+  if(debit<0.05||debit>=w)return null;
+  const n=Math.floor(maxRisk/(debit*100+comm*4));          /* two legs in, two legs out */
+  const BE=isCall?KL+debit:KL-debit;
+  const beMove=(BE-G)/G, tgtMove=(gldTarget-G)/G;
+  const clears=isCall? gldTarget>BE : gldTarget<BE;
+  const intr=P=>isCall?Math.min(Math.max(P-KL,0),w):Math.min(Math.max(KL-P,0),w);
+  const tRem=Math.max(ex.dte-estDays,0)/365;
+  const earlyVal=bs(gldTarget,KL,tRem,iv,r,isCall).price-bs(gldTarget,KS,tRem,iv,r,isCall).price;
+  const expVal=intr(gldTarget), flatVal=intr(G);
+  const nn=Math.max(n,1);
+  const commRT=nn*comm*4, cost=nn*debit*100;
+  const plEarly=nn*(earlyVal-debit)*100-commRT;
+  const plExp=nn*(expVal-debit)*100-commRT;
+  const plFlat=nn*(flatVal-debit)*100-commRT;
+  const maxLoss=cost+nn*comm*2;
+  const maxProfit=nn*(w-debit)*100-commRT;
+  let plInv=null;
+  if(gldInvalid!=null){
+    const tInv=Math.max(ex.dte-estDays*0.5,0)/365;
+    plInv=nn*(bs(gldInvalid,KL,tInv,iv,r,isCall).price-bs(gldInvalid,KS,tInv,iv,r,isCall).price-debit)*100-commRT}
+  /* ---- score & tags ---- */
+  let s=0;const tags=[];const buf=ex.dte/estDays;
+  const rr=plExp/maxLoss;                                    /* reward : risk if the target holds to expiry */
+  const capBeyond=isCall? KS>gldTarget : KS<gldTarget;      /* full profit needs more than the target */
+  if(n<1){s=1;tags.push('Premium exceeds risk budget')}
+  else if(buf<1){s=2;tags.push('Expires before your estimate')}
+  else if(!clears){s=3;tags.push('Loses even if right')}
+  else{
+    s+=clamp((Math.abs(tgtMove)-Math.abs(beMove))/Math.abs(tgtMove),0,0.6)*20;
+    s+=clamp(plEarly/maxLoss,0,1.5)/1.5*20;
+    if(buf<1.6){s+=4;tags.push('Needs speed')}
+    else if(buf<=3.4)s+=20;
+    else{s+=10;tags.push('Paying for extra time')}
+    s+=clamp(rr/2.5,0,1)*30;                                 /* a spread is judged mostly on what it pays per $ risked */
+    if(rr<1){s-=8;tags.push('Reward below risk')}
+    if(capBeyond)tags.push('Max profit past target');
+    s+=(1+clamp(plFlat/maxLoss,-1,0))*10;
+  }
+  return{kind:'spread',K:KL,KS,w,ex,prem:debit,premLong:eL.price,premShort:eS.price,estim:debitOverride==null,
+    delta:eL.delta-eS.delta,thetaDay:(eL.thetaDay-eS.thetaDay)*100*nn,n,over:n<1,BE,BExau:BE/ratio,beMove,tgtMove,
+    cost,maxLoss,maxProfit,rr,plEarly,plExp,plFlat,plInv,score:s,tags,isCall,best:false}}
 
 function priceCandidate(ctx,K,ex,askOverride){
   const {G,iv,r,comm,isCall,gldTarget,gldInvalid,estDays,maxRisk,ratio}=ctx;
@@ -434,7 +519,7 @@ function priceCandidate(ctx,K,ex,askOverride){
     else if(dA<0.25){s+=2;tags.push('Lottery ticket')}
     s+=(1+clamp(plFlat/maxLoss,-1,0))*10;
   }
-  return{K,ex,prem,estim:askOverride==null,delta:entry.delta,
+  return{kind:'single',K,ex,prem,estim:askOverride==null,delta:entry.delta,
     thetaDay:entry.thetaDay*100*nn,n,over:n<1,BE,BExau:BE/ratio,beMove,tgtMove,
     cost,maxLoss,plEarly,plExp,plFlat,plInv,score:s,tags,isCall,best:false}}
 
@@ -450,7 +535,8 @@ function pl(v){return'<b class="'+(v>=0?'pos':'neg')+'">'+fmt$(v)+'</b>'}
 function railSVG(ctx,best){
   const pts=[{v:ctx.G,l:'spot',c:'var(--gold-bright)'},{v:ctx.gldTarget,l:'target',c:'var(--jade)'}];
   if(ctx.gldInvalid!=null)pts.push({v:ctx.gldInvalid,l:'invalid',c:'var(--clay)'});
-  if(best)pts.push({v:best.BE,l:'break-even',c:'#cfc6b0',dash:true});
+  if(best){pts.push({v:best.BE,l:'break-even',c:'#cfc6b0',dash:true});
+    if(best.kind==='spread')pts.push({v:best.KS,l:'max profit',c:'#9fd8b8',dash:true})}
   const lo=Math.min(...pts.map(p=>p.v)),hi=Math.max(...pts.map(p=>p.v));
   const pad=(hi-lo)*0.12||1,a=lo-pad,b=hi+pad,W=720,X=v=>40+(v-a)/(b-a)*(W-80);
   pts.forEach(p=>p.x=X(p.v));
@@ -468,30 +554,37 @@ function railSVG(ctx,best){
        '<text x="'+tx(p.x)+'" y="'+yBot+'" fill="var(--muted)" font-size="10.5" text-anchor="middle">'+ctx.chartSym+' '+fmt2(p.v/ctx.ratio)+'</text>'}
   return'<svg viewBox="0 0 '+W+' 120" width="100%" role="img" aria-label="price rail">'+g+'</svg>'}
 
+function cname(c,ctx){
+  return ctx.undSym+' '+fmtDate(c.ex.date)+' '+(c.kind==='spread'?c.K+'/'+c.KS+(c.isCall?' C':' P')+' spread':c.K+(c.isCall?' C':' P'))}
 function card(c,i,ctx){
-  const name=ctx.undSym+' '+fmtDate(c.ex.date)+' '+c.K+(c.isCall?' C':' P');
+  const name=cname(c,ctx), sp=c.kind==='spread';
   const inv=c.plInv==null?'':
     '<div class="kv"><b class="'+(c.plInv>=0?'pos':'neg')+'">'+fmt$(c.plInv)+'</b><span>if invalidated (mid-way)</span></div>'+
     '<div class="kv"><b>'+(c.plInv<0?(c.plEarly/Math.abs(c.plInv)).toFixed(2)+' R':'—')+'</b><span>reward : risk (like forex R)</span></div>';
+  const legs=sp?'<div class="kv"><b>'+fmt2(c.premLong)+' − '+fmt2(c.premShort)+'</b><span>buy '+c.K+' − sell '+c.KS+' (per share)</span></div>':'';
+  const cap=sp?'<div class="kv">'+pl(c.maxProfit)+'<span>max profit (beyond '+c.KS+' at expiry)</span></div>'+
+    '<div class="kv"><b>'+c.rr.toFixed(2)+' R</b><span>reward : risk if target holds to expiry</span></div>':'';
   return '<div class="opt'+(c.best?' best':'')+'" data-i="'+i+'">'+
     '<div class="opt-head"><span class="opt-name">'+name+'</span>'+verdictPill(c)+'</div>'+
     '<div class="opt-body">'+
-      '<div class="kv"><b class="gold">$'+fmt2(c.prem)+(c.estim?' <span style="font-size:10px;color:var(--muted)">est.</span>':'')+'</b><span>premium / share'+(c.estim?' (Black–Scholes)':' (your ask)')+'</span></div>'+
-      '<div class="kv"><b>'+(c.over?'0 ⚠':c.n)+' × '+fmt$(c.prem*100)+'</b><span>contracts × cost'+(c.over?' — over budget':'')+'</span></div>'+
-      '<div class="kv"><b>'+fmt2(c.BE)+' / '+fmt2(c.BExau)+'</b><span>break-even GLD / XAU</span></div>'+
+      '<div class="kv"><b class="gold">$'+fmt2(c.prem)+(c.estim?' <span style="font-size:10px;color:var(--muted)">est.</span>':'')+'</b><span>'+(sp?'net debit':'premium')+' / share'+(c.estim?' (Black–Scholes)':(sp?' (your debit)':' (your ask)'))+'</span></div>'+
+      '<div class="kv"><b>'+(c.over?'0 ⚠':c.n)+' × '+fmt$(c.prem*100)+'</b><span>'+(sp?'spreads':'contracts')+' × cost'+(c.over?' — over budget':'')+'</span></div>'+
+      legs+
+      '<div class="kv"><b>'+fmt2(c.BE)+' / '+fmt2(c.BExau)+'</b><span>break-even '+ctx.undSym+' / '+ctx.chartSym+'</span></div>'+
       '<div class="kv"><b>'+fmtPct(c.beMove)+' vs '+fmtPct(c.tgtMove)+'</b><span>move to BE vs your target</span></div>'+
       '<div class="kv">'+pl(c.plEarly)+'<span>target hit at your estimate (sell early)</span></div>'+
       '<div class="kv">'+pl(c.plExp)+'<span>target hit at expiry</span></div>'+
-      '<div class="kv">'+pl(c.plFlat)+'<span>gold flat to expiry</span></div>'+
+      cap+
+      '<div class="kv">'+pl(c.plFlat)+'<span>'+ctx.chartSym+' flat to expiry</span></div>'+
       '<div class="kv"><b class="neg">'+fmt$(-c.maxLoss)+'</b><span>max loss (= your stop)</span></div>'+
-      '<div class="kv"><b>'+c.delta.toFixed(2)+'</b><span>delta</span></div>'+
-      '<div class="kv"><b class="neg">'+fmt$(c.thetaDay)+'/day</b><span>time decay now</span></div>'+
+      '<div class="kv"><b>'+c.delta.toFixed(2)+'</b><span>'+(sp?'net delta':'delta')+'</span></div>'+
+      '<div class="kv"><b class="'+(c.thetaDay>=0?'pos':'neg')+'">'+fmt$(c.thetaDay)+'/day</b><span>time decay now</span></div>'+
       inv+
       '<div class="note">'+c.ex.dte+' DTE — '+(c.ex.dte/ctx.estDays).toFixed(1)+'× your '+ctx.estDays+'-day estimate.'+
       (c.tags.length&&!c.best?' '+c.tags.join(' · ')+'.':'')+'</div>'+
     '</div>'+
     '<div class="opt-foot">'+
-      '<div class="ask-wrap"><label>real IBKR ask</label><input type="number" step="0.01" placeholder="'+fmt2(c.prem)+'" data-ask="'+i+'"></div>'+
+      '<div class="ask-wrap"><label>'+(sp?'real IBKR net debit':'real IBKR ask')+'</label><input type="number" step="0.01" placeholder="'+fmt2(c.prem)+'" data-ask="'+i+'"></div>'+
       '<button class="logbtn" data-log="'+i+'">Log this setup</button>'+
     '</div></div>'}
 
@@ -509,7 +602,8 @@ function render(){
   R.querySelectorAll('input[data-ask]').forEach(inp=>inp.addEventListener('change',()=>{
     const i=+inp.dataset.ask,c=lastCands[i],v=parseFloat(inp.value);
     if(!(v>0))return;
-    const re=priceCandidate(lastCtx,c.K,c.ex,v);
+    const re=c.kind==='spread'?priceSpread(lastCtx,c.K,c.KS,c.ex,v):priceCandidate(lastCtx,c.K,c.ex,v);
+    if(!re)return;
     re.best=c.best; lastCands[i]=re; render()}));
   R.querySelectorAll('button[data-log]').forEach(btn=>btn.addEventListener('click',e=>{e.stopPropagation();logSetup(lastCands[+btn.dataset.log])}));
   R.querySelectorAll('.opt').forEach(el=>el.addEventListener('click',e=>{
@@ -520,23 +614,25 @@ function render(){
 const ibkrDate=d=>d.toLocaleDateString('en-US',{month:'short'})+d.getDate()+"'"+String(d.getFullYear()).slice(-2);
 const tRow=(k,v)=>'<div class="tkt-row"><span>'+k+'</span><b>'+v+'</b></div>';
 function openTicket(c,ctx){
-  const und=ctx.undSym, rgt=c.isCall?'Call':'Put', RGT=c.isCall?'CALL':'PUT';
+  const und=ctx.undSym, rgt=c.isCall?'Call':'Put', RGT=c.isCall?'CALL':'PUT', sp=c.kind==='spread';
   const qty=c.over?1:c.n, exp=ibkrDate(c.ex.date), lim=fmt2(c.prem);
   const debit=qty*c.prem*100;
-  const maxRet=c.isCall?'Unlimited':fmt$(Math.max(c.K-c.prem,0)*100*qty);
-  const one='BUY '+qty+' '+und+' '+exp+' '+c.K+' '+RGT+' LMT '+lim+' DAY';
+  const maxRet=sp?fmt$((c.w-c.prem)*100*qty):(c.isCall?'Unlimited':fmt$(Math.max(c.K-c.prem,0)*100*qty));
+  const one=sp?'BUY '+qty+' '+und+' '+exp+' '+c.K+'/'+c.KS+' '+RGT+' VERTICAL LMT '+lim+' DAY'
+             :'BUY '+qty+' '+und+' '+exp+' '+c.K+' '+RGT+' LMT '+lim+' DAY';
+  const legs=sp?tRow('Leg 1','BUY '+c.K+' '+RGT)+tRow('Leg 2','SELL '+c.KS+' '+RGT):tRow('Strike',c.K)+tRow('Right',RGT);
   $('tkt').innerHTML=
     '<button class="tkt-x" aria-label="close">×</button>'+
     '<div class="tkt-h"><div>'+
-      '<div class="ttl">Buy '+qty+' '+exp+' '+c.K+' '+rgt+'</div>'+
+      '<div class="ttl">Buy '+qty+' '+exp+' '+(sp?c.K+'/'+c.KS+' '+rgt+' spread':c.K+' '+rgt)+'</div>'+
       '<div class="be">Break Even: '+fmt2(c.BE)+'  ('+ctx.chartSym+' '+fmt2(c.BExau)+')</div></div>'+
-      '<div class="tkt-order">Order $'+lim+'<small>DEBIT</small></div></div>'+
-    '<div class="tkt-sec"><h4>Fill into IBKR order</h4>'+
+      '<div class="tkt-order">'+(sp?'Net $':'Order $')+lim+'<small>DEBIT</small></div></div>'+
+    '<div class="tkt-sec"><h4>Fill into IBKR order'+(sp?' (Strategy Builder → Vertical)':'')+'</h4>'+
       tRow('Action','BUY')+
       tRow('Quantity',qty+(c.over?' <span class="neg">⚠ over budget</span>':''))+
-      tRow('Symbol',und)+tRow('Expiry',exp)+tRow('Strike',c.K)+tRow('Right',RGT)+
-      tRow('Order type','LIMIT')+
-      tRow('Limit price','$'+lim+(c.estim?' <span style="color:var(--muted)">(est.)</span>':' <span style="color:var(--muted)">(your ask)</span>'))+
+      tRow('Symbol',und)+tRow('Expiry',exp)+legs+
+      tRow('Order type',sp?'LIMIT (net debit)':'LIMIT')+
+      tRow('Limit price','$'+lim+(c.estim?' <span style="color:var(--muted)">(est.)</span>':' <span style="color:var(--muted)">(your '+(sp?'debit':'ask')+')</span>'))+
       tRow('Time in force','DAY')+'</div>'+
     '<div class="tkt-sec"><h4>Performance profile</h4><div class="tkt-perf">'+
       '<div><div class="lbl">Max Loss</div><div class="val neg">'+fmt$(-c.maxLoss)+'</div></div>'+
@@ -544,7 +640,8 @@ function openTicket(c,ctx){
       '<div><div class="lbl">Max Return</div><div class="val pos">'+maxRet+'</div></div></div>'+
       '<div class="tkt-row" style="margin-top:12px"><span>Debit (cost)</span><b>'+fmt$(debit)+'</b></div>'+
       '<div class="tkt-row"><span>If target hit (your estimate)</span><b class="'+(c.plEarly>=0?'pos':'neg')+'">'+fmt$(c.plEarly)+'</b></div>'+
-      '<div class="tkt-row"><span>If target hit at expiry</span><b class="'+(c.plExp>=0?'pos':'neg')+'">'+fmt$(c.plExp)+'</b></div></div>'+
+      '<div class="tkt-row"><span>If target hit at expiry</span><b class="'+(c.plExp>=0?'pos':'neg')+'">'+fmt$(c.plExp)+'</b></div>'+
+      (sp?'<div class="tkt-row"><span>Exit</span><b>close by the day before expiry</b></div>':'')+'</div>'+
     '<div class="tkt-copy"><code>'+one+'</code><button class="cpy">Copy</button></div>';
   $('tktBack').classList.add('on');
   $('tkt').querySelector('.tkt-x').onclick=closeTicket;
@@ -570,7 +667,7 @@ function translate(auto){
   if(I!=null&&((isCall&&I>=X)||(!isCall&&I<=X)))warn='Invalidation is on the wrong side of spot — ignoring it.';
   const ctx={G,iv:ivv/100,r:(+$('rate').value||4.5)/100,comm:+$('comm').value||0.65,
     isCall,gldTarget:T*ratio,gldInvalid:(I!=null&&!((isCall&&I>=X)||(!isCall&&I<=X)))?I*ratio:null,
-    estDays:estDaysCal(),maxRisk:risk,ratio,undSym:curInstr().und,chartSym:curInstr().chart,
+    estDays:estDaysCal(),maxRisk:risk,ratio,undSym:curInstr().und,chartSym:curInstr().chart,struct,
     bufA:+$('bufA').value||2,bufB:+$('bufB').value||3,
     conf:$('conf').value,warn,err,xau:{spot:X,target:T,invalid:I}};
   lastCtx=ctx; lastCands=err?[]:buildCandidates(ctx);
@@ -612,7 +709,7 @@ function logSetup(c){
     dir:lastCtx.isCall?'up':'down',conf:lastCtx.conf,
     xauSpot:lastCtx.xau.spot,xauTarget:lastCtx.xau.target,xauInvalid:lastCtx.xau.invalid,
     estDays:lastCtx.estDays,iv:lastCtx.iv,
-    contract:lastCtx.undSym+' '+fmtDate(c.ex.date)+' '+c.K+(c.isCall?'C':'P'),
+    contract:cname(c,lastCtx),
     dte:c.ex.dte,prem:c.prem,n:c.n,maxLoss:c.maxLoss,plEarlyPlan:c.plEarly,
     note,status:'open',outcome:null});
   saveLog();renderLog();
