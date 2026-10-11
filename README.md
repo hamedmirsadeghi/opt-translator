@@ -28,6 +28,22 @@ server, $0/month.
 | `market.js` | Seed data file (gets overwritten by the bot) |
 | `tools/` | Optional local fetchers (IBKR gateway / Yahoo) — not used in the cloud |
 
+## Structure: single option or vertical spread
+
+Under **Your setup → Structure** the translator offers two ways to express the same chart idea:
+
+| | Single option | Vertical spread |
+|---|---|---|
+| What you do | Buy one call or put | Buy one near spot **and sell one near your target** |
+| Cost (= max loss) | The whole premium | Premium bought minus premium sold |
+| Break-even | Far: the whole premium must be earned back | Nearer: the sold leg paid for part of it |
+| Profit | Uncapped | Stops at the sold strike |
+| Best when | You expect a move much bigger than your target | You expect roughly your target |
+
+Spread candidates pair a bought strike next to spot with a sold strike at, just past, or ~2.5% past the target, across the same three expiries. Cards show the net debit, both legs, break-even, profit at the target (early and at expiry), max profit and **reward : risk** (profit at the target ÷ max loss). The order ticket lists both legs for IBKR's Strategy Builder (vertical). Paste IBKR's real net debit into the card and the numbers recompute.
+
+Close a debit spread the day before expiry: one that expires between its strikes is exercised into a share position.
+
 ---
 
 ## Setup — about 15 minutes, once
