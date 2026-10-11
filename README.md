@@ -1,6 +1,6 @@
-# XAU → GLD Options Translator — Zero-PC Cloud Setup
+# Options Scenario Planner (GLD / IBIT) — Zero-PC Cloud Setup
 
-Your app hosted free on **GitHub Pages**, with market data (GLD / GLDM / IBIT
+Your app hosted free on **GitHub Pages**, with market data (GLD / IBIT
 prices + ATM implied volatility, XAU & BTC spot) refreshed automatically every
 15 minutes during US market hours by **GitHub Actions**. No PC involved, no
 server, $0/month.
@@ -22,27 +22,36 @@ server, $0/month.
 
 | File | Purpose |
 |---|---|
-| `index.html` | The translator app (unchanged logic, hosted-ready) |
+| `index.html` | The planner app (single page, no build step) |
 | `fetch_market_cloud.py` | The fetcher that Actions runs |
 | `.github/workflows/market-data.yml` | The schedule + commit automation |
 | `market.js` | Seed data file (gets overwritten by the bot) |
 | `tools/` | Optional local fetchers (IBKR gateway / Yahoo) — not used in the cloud |
 
-## Structure: single option or vertical spread
+## How the app works
 
-Under **Your setup → Structure** the translator offers two ways to express the same chart idea:
+Three steps, then results:
+
+1. **Market** — pick Bitcoin (IBIT options) or Gold (GLD options), press **Fill from market data** (or type the ETF price, your chart price and the IV from the top of IBKR's option chain).
+2. **Your trade** — direction, **entry level** (today's price or a future level you are waiting for), stop, target, days to reach the target, entry date, risk budget. Advanced: rate, commission, expiry buffer, a volatility shift for the projections, and which position types to show.
+3. **Results**
+   - a plain-words card: what to buy, what you pay, the most you can lose, the profit at your target, the cap, and why it was chosen;
+   - **Positions compared**: up to four vertical debit spreads and two single options, ranked by **R** (profit at your target on expiry day ÷ max loss); click a row to make it the plan;
+   - **What happens at each price and date**: stop, entry, break-even, target and past-target rows against at-entry, two weeks before expiry, one week before, and expiry day;
+   - **Profit and loss by price**: one line per date, hover for exact figures, table view;
+   - **Do this on Interactive Brokers**: the legs, quantity and limit for Strategy Builder, a copy line, and the exit plan (close the day before expiry).
 
 | | Single option | Vertical spread |
 |---|---|---|
-| What you do | Buy one call or put | Buy one near spot **and sell one near your target** |
+| What you do | Buy one call or put | Buy one near your entry **and sell one near your target** |
 | Cost (= max loss) | The whole premium | Premium bought minus premium sold |
 | Break-even | Far: the whole premium must be earned back | Nearer: the sold leg paid for part of it |
 | Profit | Uncapped | Stops at the sold strike |
 | Best when | You expect a move much bigger than your target | You expect roughly your target |
 
-Spread candidates pair a bought strike next to spot with a sold strike at, just past, or ~2.5% past the target, across the same three expiries. Cards show the net debit, both legs, break-even, profit at the target (early and at expiry), max profit and **reward : risk** (profit at the target ÷ max loss). The order ticket lists both legs for IBKR's Strategy Builder (vertical). Paste IBKR's real net debit into the card and the numbers recompute.
+**Accuracy.** This site cannot reach IBKR, so costs are Black–Scholes estimates at the IV you enter, on the strike and expiry pattern IBKR lists (IBIT: Fridays; GLD: Mon/Wed/Fri; plus monthlies). Paste IBKR's real net debit (or ask, for a single option) into the box on the plan card and the whole plan recomputes from that price. Projections before expiry use the same volatility; expiry-day values are exact. The claude.ai version of this planner reads live IBKR bid/ask and each option's own IV through your IBKR connector and can send the order to IBKR for review.
 
-Close a debit spread the day before expiry: one that expires between its strikes is exercised into a share position.
+**Setup log & calibration** at the bottom records each plan you take (**Log this setup** on the plan card) and the outcome you enter later, so you can see your hit rate by confidence and how your time estimates compare with reality. It lives in the browser; use Export/Import to move it between devices.
 
 ---
 
@@ -110,12 +119,14 @@ it behaves like an app.
 
 ## Daily use
 1. Do your analysis on TradingView as always.
-2. Open the app URL anywhere → pick instrument (GLD / GLDM / IBIT) →
-   **Fill from market data** → enter target, invalidation, timeline,
-   confidence, risk → **Translate**.
-3. Shortlist 1–2 candidates → check their real asks in IBKR → paste into
-   the card → decide → order + GTC take-profit in IBKR.
-4. **Log this setup** on the card you took; record the outcome when it
+2. Open the app URL anywhere → pick instrument (IBIT / GLD) →
+   **Fill from market data** → enter entry, stop, target, days, risk →
+   **Build my plan**.
+3. Read the plan card and the price-by-date table → check the real net
+   debit in IBKR's Strategy Builder → paste it into the plan card →
+   decide → place the order in IBKR, then set the closing order for the
+   day before expiry.
+4. **Log this setup** on the plan card; record the outcome when it
    resolves. Use **Export JSON** to move the log between phone/desktop
    (it lives in each browser's local storage).
 
